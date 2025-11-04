@@ -1,0 +1,179 @@
+.card-header{
+    background-color: rgb(31 41 55 / 1);
+}
+
+.btn-dt{
+    color: white !important;
+    font-weight: 400 !important;
+    font-size: .8125rem !important;
+}
+
+.btn-dt-success{
+    color: #fff !important;
+    background-color:#0ab39c !important;
+    border-color: #0ab39c !important;
+    font-weight: 400 !important;
+    font-size: .8125rem !important;
+}
+
+.btn-dt-info {
+    color: #fff !important;
+    background-color: #299cdb !important;
+    border-color: #299cdb !important;
+    font-weight: 400 !important;
+    font-size: .8125rem !important;
+}
+
+.btn-dt-warning {
+    color: #fff !important;
+    background-color: #f7b84b !important;
+    border-color: #f7b84b !important;
+    font-weight: 400 !important;
+    font-size: .8125rem !important;
+}
+
+.btn-dt-danger {
+    color: #fff !important;
+    background-color: #f7574b !important;
+    border-color: #f7574b !important;
+    font-weight: 400 !important;
+    font-size: .8125rem !important;
+}
+
+.dataTables_length{
+    text-align: right;
+    float: right !important;
+}
+
+.page-item.active .page-link {
+    color: black;
+    background-color: white !important;
+    border-color: white !important;
+}
+
+.select2-container .select2-selection--single {
+    height: calc(1.8125rem + 2px) !important;
+    padding-top: .25rem;
+    padding-bottom: .25rem;
+    padding-left: .1rem;
+    font-size: 75%;
+  }
+
+.select2-selection {
+    line-height: 20px !important;
+    font-size: .875rem;
+}
+
+.select2-selection__arrow {
+    height: 34px !important;
+}
+
+  /* que siempre ocupen todo el ancho */
+  .select2-container { width: 100% !important; }
+
+  /* z-index para que el dropdown quede por delante del modal-content */
+  .select2-container--open { z-index: 9999 !important; }
+
+  /* altura estilo .form-control (38px) */
+  .select2-container .select2-selection--single {
+    height: calc(2.25rem + 2px);
+    padding: .375rem .75rem;
+    border: 1px solid #ced4da;
+    border-radius: .25rem;
+  }
+  .select2-container--default .select2-selection--single .select2-selection__rendered {
+    line-height: 2.25rem;
+  }
+  .select2-container--default .select2-selection--single .select2-selection__arrow {
+    height: 2.25rem;
+    right: .5rem;
+  }
+
+  /* si quieres versión pequeña como tus inputs .form-control-sm (31px) 
+     aplica la clase helper .select2-sm al <select> y descomenta: */
+  /*
+  .select2-sm + .select2 .select2-selection--single {
+    height: calc(1.8125rem + 2px);
+    padding: .25rem .5rem;
+  }
+  .select2-sm + .select2 .select2-selection__rendered,
+  .select2-sm + .select2 .select2-selection__arrow { height: 1.8125rem; line-height: 1.8125rem; }
+  */
+              
+  /* corrige saltos */
+.form-group {
+    margin-bottom: .4rem;
+}
+
+body {
+    background-color: black;
+    background-image:
+        linear-gradient(
+            to top right,
+            black, #2b2a2aff
+        );
+}
+
+.login-box {
+    position: flex;
+    left: 0;
+    right: 0;
+    z-index: 9999;
+    margin-left: 20px;
+    margin-right: 20px;
+}
+
+.login-box .login-box-content {
+    min-width: 0;
+    flex-grow: 1;
+}
+
+.pac-container {
+    z-index: 1056 !important;
+}
+
+.card-body-gray{
+    background-color: lightgrey;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button{
+    padding: 0 !important;
+}
+
+.upload-msg {
+    text-align: center;
+    padding: 20px;
+    font-size: 15px;
+    color: #aaa;
+    width: 260px;
+    margin: 10px auto;
+    border: 1px solid #aaa;
+}
+
+.upload-demo-wrap{
+    max-height: 700px;
+}
+
+.croopie-container{
+    max-height: 700px;
+}
+.croppie-container .cr-boundary{
+    max-height: 600px;
+}
+
+.file-btn {
+    position: relative;
+}
+.file-btn input[type="file"] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.select2-container--default .select2-selection--multiple .select2-selection__choice{
+    color: black !important;
+}
