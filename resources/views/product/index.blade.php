@@ -13,6 +13,9 @@
     .upload-msg{ text-align:center;padding:12px;border:1px dashed #aaa;color:#777; }
     .thumb{ width:64px; height:64px; object-fit:cover; border-radius:6px; border:1px solid #ddd; }
     .thumb-wrap{ display:flex; gap:.5rem; flex-wrap:wrap; }
+    .croppie-container { width:100%; }
+    .cr-boundary { width:100% !important; max-width: 460px; height: 340px !important; } /* <- altura explícita */
+
   </style>
 @endsection
 
@@ -115,6 +118,11 @@
                   <label>Imágenes (slider)</label>
                   <div class="upload-msg mb-2">Sube una imagen, recórtala y “Agregar a galería”.</div>
                   <div class="upload-demo-wrap"><div id="upload-demo"></div></div>
+                  <div class="form-check form-switch mt-2">
+                    <input class="form-check-input" type="checkbox" id="switchReplacePrimary">
+                    <label class="form-check-label" for="switchReplacePrimary">Reemplazar foto principal</label>
+                  </div>
+                  <input type="hidden" name="replace_primary" value="0">
                   <div class="mt-2 d-flex gap-2">
                     <label class="btn btn-sm bg-gradient-dark text-white file-btn mb-0">
                       <span>Nueva Imagen</span>
@@ -200,34 +208,66 @@
     });
 
     // ====== Croppie (multi) ======
-    const $crop = $('#upload-demo').croppie({
-      viewport: { width: 380, height: 300 },
-      enableExif: true
-    });
-    let pendingImages = [];
+    let $crop = null;
+    function initCroppie(){
+      if ($crop) { $('#upload-demo').croppie('destroy'); $crop = null; }
+      $crop = $('#upload-demo').croppie({
+        viewport: { width: 380, height: 300 },
+        enableExif: true
+      });
+    }
 
     function resetCrop(){
       pendingImages = [];
       $('#thumbs').empty();
       $(".upload-demo-wrap").hide(); $(".upload-msg").show();
+      if ($crop) { $('#upload-demo').croppie('destroy'); $crop = null; }
     }
-    $('#upload').on('change', function(){
-      if (this.files && this.files[0]){
-        const reader = new FileReader();
-        reader.onload = e => {
-          $crop.croppie('bind', { url: e.target.result });
-          $(".upload-demo-wrap").show(); $(".upload-msg").hide();
-        };
-        reader.readAsDataURL(this.files[0]);
-      }
+
+    // al mostrar el modal => reinit croppie para que calcule tamaño real
+    $productModal.on('shown.bs.modal', function(){
+      initCroppie();
     });
+
+    $('#upload').on('change', function(){
+      if (!this.files || !this.files[0]) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        if (!$crop) initCroppie();
+        $crop.croppie('bind', { url: e.target.result });
+        $(".upload-demo-wrap").show(); $(".upload-msg").hide();
+      };
+      reader.readAsDataURL(this.files[0]);
+    });
+
     $('.add-to-gallery').on('click', function(){
+      if (!$crop) return;
       $crop.croppie('result', { type:'canvas', size:'viewport', format:'jpeg', quality:0.9 })
         .then(function(b64){
           pendingImages.push(b64);
-          $('#thumbs').append($('<img class="thumb">').attr('src', b64));
+          // thumb con botón X para quitar del “pendiente”
+          const idx = pendingImages.length - 1;
+          $('#thumbs').append(`
+            <div class="position-relative d-inline-block me-1 mb-1">
+              <img class="thumb" src="${b64}">
+              <button type="button" class="btn btn-xs btn-danger position-absolute" 
+                      style="top:-6px; right:-6px; padding:0 .35rem" data-pend="${idx}">×</button>
+            </div>
+          `);
         });
     });
+
+    // quitar imagen pendiente (antes de guardar)
+    $(document).on('click', 'button[data-pend]', function(){
+      const i = +$(this).data('pend');
+      pendingImages.splice(i,1);
+      $(this).parent().remove();
+    });
+
+    $('#switchReplacePrimary').on('change', function(){
+      $productForm.find('input[name="replace_primary"]').val(this.checked ? '1' : '0');
+    });
+
 
     // ====== DataTable (usa tu helper initCrudTable; si no existe, inicializa simple) ======
     const dtOptions = {
@@ -325,9 +365,20 @@
         $('#category_id').val(null).trigger('change');
       }
 
-      if (row.primary_photo && row.primary_photo.url){
-        $('#thumbs-current').append(`<img class="thumb" src="${row.primary_photo.url}">`);
+      if (row.photos && row.photos.length){
+        row.photos.forEach(photo => {
+          $('#thumbs-current').append(`
+            <div class="position-relative d-inline-block me-1 mb-1">
+              <img class="thumb" src="${photo.url}">
+              ${photo.is_primary ? '<span class="badge badge-primary position-absolute" style="bottom:-6px;left:0;">Principal</span>' : ''}
+              <button type="button" class="btn btn-xs btn-danger position-absolute js-del-photo" 
+                      style="top:-6px; right:-6px; padding:0 .35rem"
+                      data-photo="${photo.id}" data-product="${row.id}">×</button>
+            </div>
+          `);
+        });
       }
+
 
       $productModal.modal('show');
     });
@@ -356,6 +407,33 @@
         }
       });
     });
+
+    $(document).on('click', '.js-del-photo', async function(){
+      const photoId   = $(this).data('photo');
+      const productId = $(this).data('product');
+      const $wrap = $(this).parent();
+
+      const ok = await Swal.fire({title:'¿Eliminar foto?', icon:'warning', showCancelButton:true});
+      if (!ok.isConfirmed) return;
+
+      $.ajax({
+        url: `/product/${productId}/photos/${photoId}`,
+        type: 'DELETE',
+        dataType: 'json',
+        headers: {'X-CSRF-TOKEN': token},
+        success: function(r){
+          if (r.status === 200) {
+            $wrap.remove();
+            Swal.fire({toast:true, icon:'success', title:'Foto eliminada', showConfirmButton:false, timer:1200});
+            table.ajax.reload(null, false);
+          } else {
+            Swal.fire({icon:'error', title:r.message || 'No se pudo eliminar'});
+          }
+        },
+        error: function(){ Swal.fire({icon:'error', title:'Error al eliminar'}); }
+      });
+    });
+
 
     function showErrors(res){
       let error = '';

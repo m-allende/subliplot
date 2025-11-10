@@ -113,7 +113,8 @@
         cartSummary:"/store/cart/summary",
         cartRemove: "/store/cart/remove/:rowId", // usar replace(':rowId', id) en JS
         productConfig: "/store/products/:pid/config", // idem replace
-        cartClear:"{{ route('store.cart.clear') }}"
+        cartClear:"{{ route('store.cart.clear') }}",
+        cartCheckout: "{{ route('store.checkout.index') }}"
       };
       window.CSRF_TOKEN = "{{ csrf_token() }}";
     </script>

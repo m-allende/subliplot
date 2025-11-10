@@ -138,6 +138,8 @@ class ProductController extends Controller
             }
         }
 
+        $baseSort = ($product->photos()->max('sort_order') ?? 0);
+
         foreach ($images as $idx => $base64) {
             $payload = preg_replace('#^data:image/\w+;base64,#i', '', $base64);
             $bin     = base64_decode(str_replace(' ', '+', $payload));
@@ -146,20 +148,57 @@ class ProductController extends Controller
             $filename = 'prod_'.date('Ymd_His').'_' . Str::random(6) . '.jpg';
             $relPath  = 'products/'.$filename;
             $absPath  = public_path('uploads/'.$relPath);
-
             file_put_contents($absPath, $bin);
+
+            $isFirstNew = ($idx === 0);
+            $existsPrimary = $product->photos()->where('is_primary', true)->exists();
 
             $product->photos()->create([
                 'disk'       => 'public_uploads',
                 'path'       => $relPath,
-                'is_primary' => ($replacePrimary && $idx === 0)
-                                ? true
-                                : (!$product->photos()->where('is_primary',true)->exists() && $idx===0),
+                'is_primary' => $replacePrimary
+                                    ? $isFirstNew
+                                    : (!$existsPrimary && $isFirstNew),
                 'title'      => 'Foto producto',
-                'sort_order' => $product->photos()->max('sort_order') + 1,
+                'sort_order' => ++$baseSort,
             ]);
         }
     }
+
+    public function destroyPhoto(Product $product, Photo $photo)
+    {
+        // seguridad: que la foto pertenezca al producto
+        if ($photo->imageable_type !== Product::class || $photo->imageable_id !== $product->id) {
+            return response()->json(['status'=>403, 'message'=>'No autorizado'], 403);
+        }
+
+        DB::beginTransaction();
+        try {
+            $wasPrimary = (bool) $photo->is_primary;
+
+            // borrar archivo físico
+            $abs = public_path('uploads/'.ltrim($photo->path,'/'));
+            if (is_file($abs)) @unlink($abs);
+
+            $photo->delete();
+
+            // si era principal, marcar otra como principal (la de menor sort_order)
+            if ($wasPrimary) {
+                $next = $product->photos()->orderBy('sort_order')->first();
+                if ($next) {
+                    $next->is_primary = true;
+                    $next->save();
+                }
+            }
+
+            DB::commit();
+            return response()->json(['status'=>200, 'message'=>'Foto eliminada', 'was_primary'=>$wasPrimary]);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json(['status'=>400, 'message'=>$e->getMessage()], 400);
+        }
+    }
+
 }
 
 

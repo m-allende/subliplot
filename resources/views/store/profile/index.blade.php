@@ -53,7 +53,7 @@
               </div>
               <div class="mb-3">
                 <label class="form-label text-secondary">Correo electrónico</label>
-                <input type="email" name="email" value="{{ $user->email }}" class="form-control">
+                <input type="email" name="email" readonly value="{{ $user->email }}" class="form-control">
               </div>
               <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i> Guardar cambios</button>
             </form>
@@ -338,12 +338,41 @@
     $(document).ready(function() {
         // --- Datos personales ---
         $('#form-user').on('submit', async e => {
-            e.preventDefault();
-            const data = Object.fromEntries(new FormData(e.target));
-            const res = await fetch('/store/profile/update', {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-TOKEN':window.CSRF_TOKEN}, body:JSON.stringify(data)});
-            const j = await res.json();
-            Swal.fire({toast:true,icon:j.status===200?'success':'error',title:j.message||'Error',timer:1800,showConfirmButton:false});
+          e.preventDefault();
+          const data = Object.fromEntries(new FormData(e.target));
+
+          const res = await fetch('/store/profile/update', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',              // <-- IMPORTANTE
+              'X-CSRF-TOKEN': window.CSRF_TOKEN
+            },
+            body: JSON.stringify(data)
+          });
+
+          // Siempre intenta leer JSON; si no viene, lee texto para debug
+          let payload;
+          const ct = res.headers.get('content-type') || '';
+          if (ct.includes('application/json')) {
+            payload = await res.json();
+          } else {
+            const text = await res.text();
+            console.error('Respuesta no-JSON:', text);
+            return Swal.fire({icon:'error', title:'Error inesperado', text:'Respuesta no válida del servidor.'});
+          }
+
+          if (res.ok && payload.status === 200) {
+            Swal.fire({toast:true, icon:'success', title: payload.message, timer:1800, showConfirmButton:false});
+          } else if (res.status === 422 && payload.errors) {
+            // Muestra el primer error de validación
+            const first = Object.values(payload.errors)[0][0];
+            Swal.fire({icon:'error', title: first});
+          } else {
+            Swal.fire({icon:'error', title: payload.message || 'Error al actualizar'});
+          }
         });
+
 
         // --- Avatar ---
         $('#avatar').on('change', async function(){

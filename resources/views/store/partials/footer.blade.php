@@ -30,7 +30,7 @@
         <span id="cartTotal">$ 0</span>
       </div>
       <div class="d-grid mt-3">
-        <a href="{{ route('store.checkout.index') }}" class="btn btn-primary btn-lg">Ir a pagar</a>
+        <a id="cartCheckout" href="#" class="btn btn-primary btn-lg">Ir a pagar</a>
       </div>
     </div>
   </div>

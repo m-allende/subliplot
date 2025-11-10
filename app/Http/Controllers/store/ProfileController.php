@@ -14,6 +14,9 @@ use App\Models\Address;
 use App\Models\Phone;
 use Barryvdh\DomPDF\Facade\Pdf;
 
+use App\Rules\ValidRut;
+use Illuminate\Support\Facades\Validator;
+
 class ProfileController extends Controller
 {
     public function index()
@@ -28,11 +31,33 @@ class ProfileController extends Controller
     public function update(Request $request)
     {
         $user = Auth::user();
-        $data = $request->validate([
+
+        $validator = Validator::make($request->only(["name", "rut"]),[
             'name'  => 'required|string|max:255',
-            'rut'   => 'nullable|string|max:20',
-            'email' => 'required|email|max:255',
+            'rut'   => [
+                'nullable',
+                'string',
+                'max:20',
+                new ValidRut
+            ],
+        ], [
+            'name.required' => 'El nombre es obligatorio.',
         ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'status' => 422,
+                'message' => 'Errores de validación.',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+         
+        $data = $validator->validated();
+
+        // (Opcional) Normaliza y guarda el RUT sin puntos y con guion
+        if (!empty($data['rut'])) {
+            $data['rut'] = strtoupper(str_replace(['.', ' '], '', $data['rut']));
+        }
 
         $user->update($data);
 
@@ -41,6 +66,7 @@ class ProfileController extends Controller
             'message' => 'Datos actualizados correctamente.'
         ]);
     }
+
 
     // ============================
     // AVATAR
@@ -54,7 +80,7 @@ class ProfileController extends Controller
         ]);
 
         $file = $request->file('avatar');
-        $path = $file->store('avatars', 'public');
+        $path = $file->store('users', 'public_uploads');
 
         // Elimina la foto anterior si existe
         if ($user->photos()->where('is_primary', true)->exists()) {
@@ -66,14 +92,14 @@ class ProfileController extends Controller
         }
 
         $user->photos()->create([
-            'disk' => 'public',
+            'disk' => 'public_uploads',
             'path' => $path,
             'is_primary' => true
         ]);
 
         return response()->json([
             'status' => 200,
-            'avatar_url' => Storage::disk('public')->url($path),
+            'avatar_url' => Storage::disk('public_uploads')->url($path),
         ]);
     }
 

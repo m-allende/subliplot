@@ -114,19 +114,41 @@
         ).replace(":pid", pid);
         const params = new URLSearchParams();
 
+        // NO mandamos qty al endpoint: siempre recibimos precio unitario
         Object.entries(opts).forEach(([code, ids]) => {
-            const id = Array.isArray(ids) ? ids[0] : ids; // solo uno por tipo
-            params.append(`${code}_id`, id);
+            const id = Array.isArray(ids) ? ids[0] : ids; // uno por tipo
+            if (id !== undefined && id !== null && id !== "") {
+                params.append(`${code}_id`, id);
+            }
         });
 
         const res = await fetch(`${url}?${params.toString()}`, {
             headers: { "X-Requested-With": "XMLHttpRequest" },
         });
-
         const json = await res.json();
-        if (json.status === 200 && json.price > 0) {
-            totalEl.value = json.price.toLocaleString("es-CL");
-            totalEl.dataset.price = json.price;
+
+        // Tomar precio unitario del response
+        const unit =
+            (json.price != null ? Number(json.price) : null) ??
+            (json.unit_price != null ? Number(json.unit_price) : null) ??
+            (json.data && json.data.price != null
+                ? Number(json.data.price)
+                : null) ??
+            0;
+
+        const usesQtyGroup = modalEl.dataset.usesQtyGroup === "1";
+
+        // qty: si usa grupo, no multiplicamos; si NO usa, multiplicamos por pc_qty
+        let qty = 1;
+        if (!usesQtyGroup && qtyInput) {
+            qty = parseInt(qtyInput.value, 10) || 1;
+        }
+
+        const total = unit * qty;
+
+        if (json.status === 200 && total > 0) {
+            totalEl.value = Math.round(total).toLocaleString("es-CL");
+            totalEl.dataset.price = String(total);
             document.getElementById("pc_add").disabled = false;
         } else {
             totalEl.value = "0";
@@ -141,6 +163,21 @@
         const opts = collectOptions();
 
         // Solo consultar si todos los grupos requeridos tienen valor
+        const allFilled = Object.values(opts).every((arr) => arr && arr.length);
+        if (allFilled) {
+            await fetchPrice(pid, opts);
+        } else {
+            totalEl.value = "0";
+            delete totalEl.dataset.price;
+            document.getElementById("pc_add").disabled = true;
+        }
+    });
+
+    qtyInput?.addEventListener("input", async () => {
+        if (modalEl.dataset.usesQtyGroup === "1") return; // si usa grupo, no multiplicamos aquí
+        const pid = modalEl.getAttribute("data-pid");
+        const opts = collectOptions();
+
         const allFilled = Object.values(opts).every((arr) => arr && arr.length);
         if (allFilled) {
             await fetchPrice(pid, opts);
@@ -185,6 +222,10 @@
                 headers: { "X-Requested-With": "XMLHttpRequest" },
             });
             const json = await res.json();
+
+            const usesQtyGroup = hasQuantityGroup(json);
+            modalEl.dataset.usesQtyGroup = usesQtyGroup ? "1" : "0";
+            if (qtyRow) qtyRow.classList.toggle("d-none", usesQtyGroup);
 
             if (qtyRow)
                 qtyRow.classList.toggle("d-none", hasQuantityGroup(json));
@@ -402,6 +443,51 @@ function setCartBadge(n) {
         setCartBadge(sum.items_count);
         bindRemoveButtons();
     }
+
+    document
+        .getElementById("cartCheckout")
+        ?.addEventListener("click", async (e) => {
+            e.preventDefault();
+            const btn = e.currentTarget;
+            btn.disabled = true;
+
+            try {
+                const res = await fetch(
+                    ROUTES.cartSummary || "/store/cart/summary",
+                    {
+                        headers: { "X-Requested-With": "XMLHttpRequest" },
+                    }
+                );
+                const json = await res.json();
+
+                const count =
+                    json?.summary?.items_count ??
+                    null ??
+                    (Array.isArray(json?.summary?.items)
+                        ? json.summary.items.length
+                        : 0);
+
+                if (json.status === 200 && count > 0) {
+                    location.href = ROUTES.cartCheckout || "/store/checkout";
+                } else {
+                    // vacío
+                    Swal.fire({
+                        icon: "info",
+                        title: "Tu carrito está vacío",
+                        text: "Agrega productos para continuar al pago.",
+                    });
+                }
+            } catch (err) {
+                console.error(err);
+                Swal.fire({
+                    icon: "error",
+                    title: "No pudimos revisar tu carrito",
+                    text: "Intenta nuevamente.",
+                });
+            } finally {
+                btn.disabled = false;
+            }
+        });
 
     async function fetchSummary() {
         const res = await fetch(ROUTES.cartSummary || "/store/cart/summary", {

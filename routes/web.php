@@ -20,6 +20,11 @@ Route::get('/', [App\Http\Controllers\SiteController::class, 'index'])->name('in
 Route::get('/catalog', [App\Http\Controllers\SiteController::class, 'catalog'])->name('catalog');
 Route::get('/contact', [App\Http\Controllers\SiteController::class, 'catalog'])->name('contact');
 Route::get('/search', [App\Http\Controllers\SiteController::class, 'search'])->name('search');
+
+Route::post('/register/store', [App\Http\Controllers\Auth\RegisteredUserController::class, 'store'])->name('userregister.store');
+Route::get('/register', [App\Http\Controllers\Auth\RegisteredUserController::class, 'index'])->name('userregister');
+
+
 Route::resource('/country', App\Http\Controllers\CountryController::class);
 Route::resource('/region', App\Http\Controllers\RegionController::class);
 Route::resource('/commune', App\Http\Controllers\CommuneController::class);
@@ -140,6 +145,14 @@ Route::middleware(['auth','role:admin'])->group(function () {
     Route::get('/attribute-type/options', [App\Http\Controllers\AttributeValueController::class,'typeOptions']);
     Route::get ('product/{product}/attributes', [\App\Http\Controllers\ProductAttributeController::class, 'show'])->name('product.attributes.show');
     Route::post('product/{product}/attributes', [\App\Http\Controllers\ProductAttributeController::class, 'update'])->name('product.attributes.update');
+    Route::delete('/product/{product}/photos/{photo}', [\App\Http\Controllers\ProductController::class, 'destroyPhoto'])->name('product.photos.destroy');
+
+
+    // routes/web.php
+    Route::post('/pay', [App\Http\Controllers\PayController::class, 'create'])->name('pay.create');
+    Route::get('/pay/return', [App\Http\Controllers\PayController::class, 'return'])->name('pay.return'); // URL final
+
+
 });
 
 // Rutas de autenticación de Breeze
