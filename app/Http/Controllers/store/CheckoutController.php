@@ -2,9 +2,11 @@
 namespace App\Http\Controllers\Store;
 
 use App\Http\Controllers\Controller;
+use App\Models\Address;
 use App\Models\Cart;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\OrderItemFile;
 use App\Models\OrderAddress;
 use App\Models\OrderDocument;
 use App\Models\AttributeType;
@@ -18,9 +20,14 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Barryvdh\DomPDF\Facade\Pdf; // requiere barryvdh/laravel-dompdf
+use App\Services\TransbankService;
+use App\Services\WebpayHttpService;
+
 
 class CheckoutController extends Controller
 {
+    public function __construct(protected WebpayHttpService $tbk) {}
+
     public function index() { 
         return view('store.checkout.index'); 
     }
@@ -91,7 +98,7 @@ class CheckoutController extends Controller
         $shippingSnap = null;
         if (!empty($data['shipping_address_id'])) {
             // copia desde Address a OrderAddress
-            $addr = \App\Models\Address::with(['country','region','commune'])
+            $addr = Address::with(['country','region','commune'])
                     ->where('addressable_id', Auth::id())
                     ->where('addressable_type', 'App\\Models\\User')                    
                     ->findOrFail((int)$data['shipping_address_id']);
@@ -157,8 +164,8 @@ class CheckoutController extends Controller
                     // Totales
                     [$itemsCount, $qtyTotal, $subtotalNet, $taxTotal, $grandTotal] = $this->computeTotals($cart);
 
-                    // Orden
-                    $order = \App\Models\Order::create([
+                    // Orden (queda pendiente de pago)
+                    $order = Order::create([
                         'user_id'        => Auth::id(),
                         'cookie_id'      => $request->cookie('cart_uid'),
                         'buyer_name'     => Auth::user()->name ?? null,
@@ -175,8 +182,9 @@ class CheckoutController extends Controller
                         'grand_total'    => $grandTotal,
                         'notes'          => $data['notes'] ?? null,
                         'doc_type'       => $data['doc_type'],
+                        'public_uid'     => \Str::uuid(), // asegúrate que exista esta col; ya la usas en thankyou
                         'meta_json'      => [
-                            'payment_method' => $data['payment_method'] ?? null,
+                            'payment_method' => $data['payment_method'] ?? 'webpay',
                             'ua' => request()->userAgent(), 'ip' => request()->ip(),
                             'from' => 'checkout',
                         ],
@@ -193,7 +201,7 @@ class CheckoutController extends Controller
                         $unitNet = (int) round($unitGross / 1.19);
                         $unitTax = $unitGross - $unitNet;
 
-                        $item = \App\Models\OrderItem::create([
+                        $item = OrderItem::create([
                             'order_id'          => $order->id,
                             'product_id'        => $it['product']['id'] ?? null,
                             'product_name'      => $it['product']['name'] ?? 'Producto',
@@ -213,26 +221,18 @@ class CheckoutController extends Controller
                             'options_map'       => $it['options_map'] ?? null,
                         ]);
 
-                       // === Adjuntos (archivo único por ítem) ===
+                        // --- mover adjuntos (igual que tu código actual) ---
                         if (!empty($it['attachment']) && is_array($it['attachment'])) {
                             $att = $it['attachment'];
-
-                            $tmpPath = $att['path'] ?? null; // ruta temporal completa
+                            $tmpPath = $att['path'] ?? null;
                             $tmpDisk = $att['disk'] ?? 'public_uploads';
                             if ($tmpPath && \Storage::disk($tmpDisk)->exists($tmpPath)) {
-                                // carpeta destino definitiva: orders/{order_id}/items/{item_id}
                                 $destDir = 'documents/orders/' . $order->id . '/items/' . $item->id;
                                 \Storage::disk('public_uploads')->makeDirectory($destDir);
-
-                                // nombre del archivo
                                 $filename = basename($tmpPath);
                                 $newPath  = $destDir . '/' . $filename;
-
-                                // mover archivo
                                 \Storage::disk($tmpDisk)->move($tmpPath, $newPath);
-
-                                // registrar en tabla (OrderItemFile)
-                                \App\Models\OrderItemFile::create([
+                                OrderItemFile::create([
                                     'order_item_id' => $item->id,
                                     'path'          => $newPath,
                                     'original_name' => $att['name'] ?? $filename,
@@ -241,17 +241,16 @@ class CheckoutController extends Controller
                                 ]);
                             }
                         }
-
                     }
 
                     // Dirección
-                    \App\Models\OrderAddress::create(array_merge($shippingSnap, [
+                    OrderAddress::create(array_merge($shippingSnap, [
                         'order_id' => $order->id,
                         'type'     => 'shipping',
                     ]));
 
-                    // Documento tributario
-                    $doc = \App\Models\OrderDocument::create([
+                    // Documento tributario → queda PENDING sin PDF
+                    OrderDocument::create([
                         'order_id' => $order->id,
                         'type'     => $data['doc_type'], // boleta|factura
                         'status'   => 'pending',
@@ -268,50 +267,71 @@ class CheckoutController extends Controller
                         'currency'     => $order->currency,
                     ]);
 
-                    // PDF
-                    $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.documents.tax', [
-                        'order' => $order->fresh(['items']),
-                        'doc'   => $doc,
-                    ]);
-                    $disk = 'public_uploads';
-                    $dir  = 'documents/orders/'.$order->id;
-                    $filename = 'document_'.$doc->type.'_'.$doc->id.'.pdf';
-                    $path = $dir.'/'.$filename;
-
-                    \Storage::disk($disk)->makeDirectory($dir);
-                    \Storage::disk($disk)->put($path, $pdf->output());
-
-                    $doc->update([
-                        'pdf_path'  => $path,
-                        'status'    => 'issued',
-                        'issued_at' => now(),
-                    ]);
-
                     // Log
                     $order->logs()->create([
                         'from_status' => null,
                         'to_status'   => 'pending_payment',
-                        'message'     => 'Orden creada desde checkout.',
+                        'message'     => 'Orden creada desde checkout (pendiente de pago Webpay).',
                         'created_by'  => Auth::id(),
                     ]);
 
-                    // Limpia carrito
-                    
-                    /*session()->forget('cart');
-
-                    if ($cartModel = $this->getOpenCartModel($request)) {
-                        $cartModel->items()->delete(); $cartModel->delete();
-                    }
-                        
-                    \Cookie::queue(\Cookie::forget('cart_uid'));
-                    */
                     return $order;
                 }, 5);
 
+                // === Crear transacción Webpay para $result->grand_total ===
+                $amount    = (int) $result->grand_total;
+                $returnUrl = config('services.transbank.return_url');
+                
+                $tbkData = $this->tbk->create($amount, $returnUrl, (string)Auth::id());
+
+                if (empty($tbkData['token']) || empty($tbkData['url'])) {
+                    \Log::error('Webpay create sin token/url', ['resp' => $tbkData]);
+                    return response()->json(['status'=>500,'message'=>'No fue posible iniciar el pago.'], 500);
+                }
+
+                
+                session([
+                    'tbk' => [
+                        'token'     => $tbkData['token'],
+                        'buy_order'  => $tbkData['buy_order'],
+                        'amount'    => $tbkData['amount'],
+                        'order_id'  => $result->id,
+                        'public_uid'=> $result->public_uid,
+                    ]
+                ]);
+
+                $result->update([
+                    'meta_json' => array_merge($result->meta_json ?? [], [
+                        'tbk' => [
+                            'token'    => $tbkData['token'],
+                            'buy_order' => $tbkData['buy_order'],
+                            'amount'   => $tbkData['amount'],
+                        ],
+                    ])
+                ]);
+
                 return response()->json([
                     'status'   => 200,
-                    'redirect' => route('store.orders.thankyou', $result->public_uid),
+                    'redirect' => $tbkData['url'].'?token_ws='.$tbkData['token'],
                 ]);
+
+
+                // (opcional) guarda en meta_json de la orden
+                $result->update([
+                    'meta_json' => array_merge($result->meta_json ?? [], [
+                        'tbk' => [
+                            'token'    => $tbkData['token'],
+                            'buy_order' => $tbkData['buy_order'],
+                            'amount'   => $tbkData['amount'],
+                        ],
+                    ])
+                ]);
+
+                return response()->json([
+                    'status'   => 200,
+                    'redirect' => $tbkData['url'].'?token_ws='.$tbkData['token'], // <<-- TU FRONT ya espera "redirect"
+                ]);
+
             } catch (\Throwable $e) {
                 $lastEx = $e;
                 \Log::warning("CheckoutController@place intento {$attempts}/3: ".$e->getMessage());
@@ -324,7 +344,7 @@ class CheckoutController extends Controller
 
     public function thankyou(string $publicUid)
     {
-        $order = \App\Models\Order::where('public_uid', $publicUid)
+        $order = Order::where('public_uid', $publicUid)
             ->with(['items','addresses','documents'])
             ->firstOrFail();
 
@@ -393,7 +413,7 @@ class CheckoutController extends Controller
         return $out;
     }
 
-    private function getOpenCartModel(Request $request): ?\App\Models\Cart
+    private function getOpenCartModel(Request $request): ?Cart
     {
         if (Auth::check()) {
             return Cart::where('user_id', Auth::id())->where('status','open')->first();
@@ -435,5 +455,119 @@ class CheckoutController extends Controller
 
         return $cart;
     }
+
+    private function issueTaxDocument(Order $order): ?OrderDocument
+    {
+        $doc = $order->documents()->orderByDesc('id')->first();
+
+        if (!$doc) return null;
+
+        // Recalcular totales por si acaso
+        $subtotalNet = (int) $order->subtotal_net;
+        $taxTotal    = (int) $order->tax_total;
+        $grandTotal  = (int) $order->grand_total;
+
+        $doc->update([
+            'subtotal_net' => $subtotalNet,
+            'tax_total'    => $taxTotal,
+            'grand_total'  => $grandTotal,
+            'currency'     => $order->currency,
+        ]);
+
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('pdf.documents.tax', [
+            'order' => $order->fresh(['items']),
+            'doc'   => $doc,
+        ]);
+
+        $disk = 'public_uploads';
+        $dir  = 'documents/orders/'.$order->id;
+        $filename = 'document_'.$doc->type.'_'.$doc->id.'.pdf';
+        $path = $dir.'/'.$filename;
+
+        \Storage::disk($disk)->makeDirectory($dir);
+        \Storage::disk($disk)->put($path, $pdf->output());
+
+        $doc->update([
+            'pdf_path'  => $path,
+            'status'    => 'issued',
+            'issued_at' => now(),
+        ]);
+
+        return $doc;
+    }
+
+    public function payReturn(Request $request)
+    {
+        $token = $request->input('token_ws');
+        if (!$token) {
+            return view('store.payment-result', ['ok'=>false,'message'=>'Token no recibido.','details'=>null]);
+        }
+
+        $res = $this->tbk->commit($token); // <-- array
+
+        //\Log::warning("Respuesta: " . json_encode($res));
+
+        $saved      = session('tbk', []);
+        $amountOk   = ((int)($res['amount'] ?? 0)) === ((int)($saved['amount'] ?? -1));
+        $orderOk    = ($res['buy_order'] ?? '') === ($saved['buy_order'] ?? '');
+        $authorized = ($res['status'] ?? '') === 'AUTHORIZED';
+
+        //\Log::warning("Saved: " . json_encode($saved));
+
+        $order = !empty($saved['order_id'])
+            ? Order::with(['documents','items'])->find($saved['order_id'])
+            : null;
+
+        if ($authorized && $amountOk && $orderOk && $order) {
+            $order->update([
+                'status'         => 'paid',
+                'payment_status' => 'paid',
+                'paid_at'        => now(),
+                'meta_json'      => array_merge($order->meta_json ?? [], [
+                    'tbk_commit' => $res,
+                ]),
+            ]);
+            $order->logs()->create([
+                'from_status' => 'pending_payment',
+                'to_status'   => 'paid',
+                'message'     => 'Pago Webpay autorizado.',
+                'created_by'  => Auth::id(),
+            ]);
+
+            $this->issueTaxDocument($order);
+
+            session()->forget('cart');
+            if ($cartModel = $this->getOpenCartModel($request)) {
+                $cartModel->items()->delete(); $cartModel->delete();
+            }
+            \Cookie::queue(\Cookie::forget('cart_uid'));
+
+            return redirect()->route('store.orders.thankyou', $order->public_uid);
+        }
+
+        if ($order) {
+            $order->update([
+                'status'         => 'payment_failed',
+                'payment_status' => 'unpaid',
+                'meta_json'      => array_merge($order->meta_json ?? [], ['tbk_error' => $res]),
+            ]);
+            $order->logs()->create([
+                'from_status' => 'pending_payment',
+                'to_status'   => 'payment_failed',
+                'message'     => 'Pago Webpay rechazado o inválido.',
+                'created_by'  => Auth::id(),
+            ]);
+        }
+
+        //dd($res);
+        return view('store.checkout.payment-result', [
+            'ok'      => false,
+            'message' => 'Pago rechazado o inválido.',
+            'details' => (object) $res, // por compatibilidad con tu blade si lo usas
+        ]);
+
+    }
+
+
 }
 

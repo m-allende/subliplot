@@ -3,6 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Store\CartController;
 use App\Http\Controllers\Store\ProfileController;
+use App\Http\Controllers\Store\WebpayController;
 
 /*
 |--------------------------------------------------------------------------
@@ -68,6 +69,7 @@ Route::prefix('store/checkout')->group(function () {
     Route::post('/guest/save', [App\Http\Controllers\Store\CheckoutController::class, 'guestSave'])->name('store.checkout.guest.save');
 });
 
+Route::get('/pay/return', [App\Http\Controllers\Store\CheckoutController::class, 'payReturn'])->name('pay.return');
 
 
 Route::get('/dashboard', function () {
@@ -89,6 +91,8 @@ Route::get('/whatsapp/contact', function () {
     $msg = urlencode('Hola! Me gustaría consultar sobre un trabajo personalizado.');
     return redirect("https://api.whatsapp.com/send?phone={$num}&text={$msg}");
 })->name('whatsapp.contact');
+
+
 
 
 Route::get('store/profile/check', [ProfileController::class, 'check'])->name('store.profile.check');
@@ -146,11 +150,6 @@ Route::middleware(['auth','role:admin'])->group(function () {
     Route::get ('product/{product}/attributes', [\App\Http\Controllers\ProductAttributeController::class, 'show'])->name('product.attributes.show');
     Route::post('product/{product}/attributes', [\App\Http\Controllers\ProductAttributeController::class, 'update'])->name('product.attributes.update');
     Route::delete('/product/{product}/photos/{photo}', [\App\Http\Controllers\ProductController::class, 'destroyPhoto'])->name('product.photos.destroy');
-
-
-    // routes/web.php
-    Route::post('/pay', [App\Http\Controllers\PayController::class, 'create'])->name('pay.create');
-    Route::get('/pay/return', [App\Http\Controllers\PayController::class, 'return'])->name('pay.return'); // URL final
 
 
 });
